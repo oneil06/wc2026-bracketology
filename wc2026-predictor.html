@@ -579,6 +579,66 @@
     .ko-select:focus { border-color: var(--gold); }
     .admin-divider { height: 1px; background: rgba(255,255,255,0.08); margin: 16px 0; }
     .admin-msg { font-size: 12px; color: var(--muted); margin-bottom: 12px; }
+
+    /* Knockout panel improvements */
+    .ko-stage-group { margin-bottom: 24px; }
+    .ko-stage-group:last-child { margin-bottom: 0; }
+    .ko-stage-label {
+      font-family: 'Anton', sans-serif;
+      font-size: 12px; letter-spacing: 1.5px;
+      text-transform: uppercase; color: var(--gold);
+      margin-bottom: 10px;
+      padding: 6px 10px;
+      background: rgba(245,200,0,0.08);
+      border-left: 3px solid var(--gold);
+      border-radius: 0 4px 4px 0;
+    }
+    .ko-row {
+      display: flex; flex-direction: column;
+      gap: 8px; padding: 12px 0;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+    .ko-row:last-child { border-bottom: none; }
+    .ko-match-info {
+      display: flex; align-items: center; gap: 10px;
+    }
+    .ko-num {
+      font-family: 'Anton', sans-serif;
+      font-size: 11px; color: var(--gold);
+      letter-spacing: 1px;
+      background: rgba(245,200,0,0.1);
+      padding: 2px 7px; border-radius: 4px;
+      flex-shrink: 0;
+    }
+    .ko-venue {
+      font-family: 'Barlow Condensed', sans-serif;
+      font-size: 12px; color: var(--muted);
+      letter-spacing: 0.5px;
+    }
+    .ko-selects {
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
+      gap: 8px; align-items: start;
+    }
+    .ko-slot { display: flex; flex-direction: column; gap: 4px; }
+    .ko-slot-label {
+      font-family: 'Barlow Condensed', sans-serif;
+      font-size: 11px; font-weight: 600;
+      color: rgba(255,255,255,0.4);
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+    }
+    .ko-vs {
+      font-family: 'Anton', sans-serif;
+      font-size: 12px; color: rgba(255,255,255,0.3);
+      letter-spacing: 1px;
+      align-self: center; padding-top: 20px;
+    }
+    .ko-assigned {
+      font-family: 'Barlow Condensed', sans-serif;
+      font-size: 11px; color: #4caf80;
+      letter-spacing: 0.3px;
+    }
   </style>
 </head>
 <body>
@@ -1158,24 +1218,73 @@
         </div>`).join('');
 
       /* Knockout team selectors */
-      const knockoutMatches = MATCHES.filter(m => m.p1); // p1 only exists on knockout matches
+      const knockoutMatches = MATCHES.filter(m => m.p1);
 
-      const buildSel = (matchN, side, placeholder, saved) =>
-        `<select class="ko-select" onchange="adminSetKnockoutTeam(${matchN},${side},this.value)">
-          <option value="">← ${placeholder}</option>
+      // Convert raw placeholder codes into readable labels
+      function readableSlot(code) {
+        if (!code) return 'TBD';
+        // Winner/Loser of a match: W73 → Winner of Match 73
+        if (/^W\d+$/.test(code)) return `Winner of Match ${code.slice(1)}`;
+        if (/^L\d+$/.test(code)) return `Loser of Match ${code.slice(1)}`;
+        // Group finishes: 1A → 1st — Group A
+        const gm = code.match(/^([123])(st|nd|rd)?([A-L])$/);
+        if (gm) {
+          const pos = gm[1] === '1' ? '1st Place' : gm[1] === '2' ? '2nd Place' : '3rd Place';
+          return `${pos} — Group ${gm[3]}`;
+        }
+        // 3rd-place qualifiers: "3rd ABCDF" → Best 3rd (A·B·C·D·F)
+        const tm = code.match(/^3rd\s+([A-L]+)$/i);
+        if (tm) return `Best 3rd — Groups ${tm[1].split('').join('·')}`;
+        // Fallback: clean up the raw code
+        return code.replace(/([A-Z])(?=[A-Z])/g,'$1·');
+      }
+
+      const buildSel = (matchN, side, placeholder, saved) => {
+        const label = readableSlot(placeholder);
+        return `<select class="ko-select" onchange="adminSetKnockoutTeam(${matchN},${side},this.value)">
+          <option value="">${saved ? '— clear selection —' : label}</option>
           ${Object.keys(TEAMS).map(k =>
             `<option value="${k}" ${k === saved ? 'selected' : ''}>${TEAMS[k].flag} ${TEAMS[k].name}</option>`
           ).join('')}
         </select>`;
+      };
 
-      document.getElementById('knockout-entries').innerHTML = knockoutMatches.map(m => {
-        const kt = adminState.knockoutTeams[m.n] || {};
-        return `<div class="ko-row">
-          <span class="ko-num">M${m.n}</span>
-          ${buildSel(m.n, 1, m.p1 || 'TBD', kt.t1 || '')}
-          ${buildSel(m.n, 2, m.p2 || 'TBD', kt.t2 || '')}
-        </div>`;
-      }).join('');
+      // Group by stage
+      const koStages = ['r32','r16','qf','sf','final'];
+      const koGroups = koStages.map(s => ({
+        stage: s,
+        label: STAGE_LABELS[s],
+        matches: knockoutMatches.filter(m => m.stage === s)
+      })).filter(g => g.matches.length);
+
+      document.getElementById('knockout-entries').innerHTML = koGroups.map(g => `
+        <div class="ko-stage-group">
+          <div class="ko-stage-label">${g.label}</div>
+          ${g.matches.map(m => {
+            const kt = adminState.knockoutTeams[m.n] || {};
+            const t1set = kt.t1 && TEAMS[kt.t1];
+            const t2set = kt.t2 && TEAMS[kt.t2];
+            return `<div class="ko-row">
+              <div class="ko-match-info">
+                <span class="ko-num">M${m.n}</span>
+                <span class="ko-venue">${m.date} · ${m.venue}</span>
+              </div>
+              <div class="ko-selects">
+                <div class="ko-slot">
+                  <div class="ko-slot-label">${readableSlot(m.p1)}</div>
+                  ${buildSel(m.n, 1, m.p1 || 'TBD', kt.t1 || '')}
+                  ${t1set ? `<div class="ko-assigned">${t1set.flag} ${t1set.name} assigned ✓</div>` : ''}
+                </div>
+                <div class="ko-vs">VS</div>
+                <div class="ko-slot">
+                  <div class="ko-slot-label">${readableSlot(m.p2)}</div>
+                  ${buildSel(m.n, 2, m.p2 || 'TBD', kt.t2 || '')}
+                  ${t2set ? `<div class="ko-assigned">${t2set.flag} ${t2set.name} assigned ✓</div>` : ''}
+                </div>
+              </div>
+            </div>`;
+          }).join('')}
+        </div>`).join('');
     }
 
     function adminToggleStage(stage, enabled) {
